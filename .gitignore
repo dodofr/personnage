@@ -1,0 +1,5 @@
+node_modules
+.env
+uploads/cadran/
+uploads/vaisseau/
+uploads/carte/
