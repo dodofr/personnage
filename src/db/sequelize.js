@@ -11,6 +11,9 @@ const AttributModel = require("../models/attributModel");
 const EquipementModel = require("../models/equipementModel");
 const ImageModel = require("../models/imageModel");
 
+//import tables de liason
+const PersonnageEquipementModel = require('../models/table de liaison/personnageEquipementModel');
+
 // Créer la connexion à la base de données MariaDB
 const sequelize = new Sequelize(`mariadb://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`, {
     dialectOptions: {
@@ -28,6 +31,7 @@ const Pouvoir = PouvoirModel(sequelize, DataTypes);
 const Attribut = AttributModel(sequelize, DataTypes);
 const Equipement = EquipementModel(sequelize, DataTypes);
 const Image = ImageModel(sequelize, DataTypes);
+const PersonnageEquipement = PersonnageEquipementModel(sequelize, DataTypes);
 
 // Regrouper les modèles dans un objet pour les associations
 const models = {
@@ -39,7 +43,8 @@ const models = {
     Pouvoir,
     Attribut,
     Equipement,
-    Image
+    Image,
+    PersonnageEquipement,
 };
 
 // Appliquer les méthodes associate() pour chaque modèle
@@ -54,7 +59,7 @@ const initDb = async () => {
     try {
         await sequelize.authenticate();
         console.log("Connexion à la base de données réussie.");
-        //await sequelize.query('SET FOREIGN_KEY_CHECKS = 0;');
+        await sequelize.query('SET FOREIGN_KEY_CHECKS = 0;');
         await sequelize.sync({ force: true }); // force: false pour conserver les données
         console.log("La base de données a bien été initialisée !");
     } catch (error) {

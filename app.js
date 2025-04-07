@@ -20,7 +20,7 @@ require('./src/routes/personnageRoutes')(app);
 
 
 //remet tout a 0
-sequelize.initDb()
+//sequelize.initDb()
 
 
 // Middleware pour gérer les erreurs 404 (ressource non trouvée)

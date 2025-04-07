@@ -4,7 +4,7 @@ const {
 } = require('../db/sequelize');
 const path = require('path');
 const fs = require('fs');
-
+const { supprimerImagesEtAttributsParEntite } = require('../utils/suppressionUtils');
 async function creerPersonnage(req, res) {
     try {
         const {
@@ -123,31 +123,26 @@ async function obtenirPersonnageParId(req, res) {
 
 async function supprimerPersonnage(req, res) {
     try {
-        const { id } = req.params;
-
-        const personnage = await Personnage.findByPk(id, {
+        const personnage = await Personnage.findByPk(req.params.id, {
             include: [{ model: Image, where: { entiteType: 'Personnage' }, required: false }]
         });
 
         if (!personnage) {
-            return res.status(404).json({ message: "Personnage non trouvé." });
+            return res.status(404).json({ message: "Personnage non trouvé" });
         }
 
-        // Supprimer les images sur disque
-        for (const img of personnage.Images ?? []) {
-            const imagePath = path.join(__dirname, '../../uploads/personnages', path.basename(img.url));
-            if (fs.existsSync(imagePath)) {
-                fs.unlinkSync(imagePath);
-            }
-            await img.destroy();
-        }
+        // Supprimer images et attributs associés
+        await supprimerImagesEtAttributsParEntite('Personnage', personnage.id);
 
+        // Supprimer le personnage
         await personnage.destroy();
-        res.status(204).json({ message: "Personnage supprimé avec succès." });
+
+        res.status(200).json({ message: "Personnage supprimé avec succès" });
     } catch (error) {
-        res.status(500).json({ message: "Erreur lors de la suppression du personnage." });
+        console.error("Erreur suppression personnage :", error);
+        res.status(500).json({ message: "Erreur serveur" });
     }
-}
+};
 async function mettreAJourPersonnage(req, res) {
     try {
         const { id } = req.params;
