@@ -1,16 +1,42 @@
 module.exports = (sequelize, DataTypes) => {
     const Faction = sequelize.define('Faction', {
-        nom: { type: DataTypes.STRING, allowNull: false, unique: true },
-        description: { type: DataTypes.TEXT },
-        parentId: { type: DataTypes.INTEGER, allowNull: true }
+        nom: {
+            type: DataTypes.STRING,
+            allowNull: false
+        },
+        description: {
+            type: DataTypes.TEXT
+        }
     });
 
     Faction.associate = (models) => {
-       // Une faction peut avoir plusieurs sous-factions (groupes)
-       Faction.hasMany(models.Faction, { foreignKey: "parentId" });
+        // Attributs dynamiques
+        Faction.hasMany(models.Attribut, {
+            foreignKey: 'entiteId',
+            constraints: false,
+            scope: { entiteType: 'Faction' },
+            as: 'attributs'
+        });
 
-       // Une faction peut avoir plusieurs groupes
-       Faction.hasMany(models.Groupe, { foreignKey: "factionId" });
+        // Images
+        Faction.hasMany(models.Image, {
+            foreignKey: 'entiteId',
+            constraints: false,
+            scope: { entiteType: 'Faction' },
+            as: 'images'
+        });
+
+        // Personnages associés
+        Faction.belongsToMany(models.Personnage, {
+            through: 'PersonnageFaction',
+            as: 'personnages'
+        });
+
+        // Groupes associés
+        Faction.hasMany(models.Groupe, {
+            foreignKey: 'FactionId',
+            as: 'groupes'
+        });
     };
 
     return Faction;

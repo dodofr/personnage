@@ -1,29 +1,42 @@
 module.exports = (sequelize, DataTypes) => {
-    const Groupe = sequelize.define("Groupe", {
+    const Groupe = sequelize.define('Groupe', {
         nom: {
             type: DataTypes.STRING,
-            allowNull: false,
-            unique: true
+            allowNull: false
         },
         description: {
-            type: DataTypes.TEXT,
-            allowNull: true
-        },
-        factionId: {
-            type: DataTypes.INTEGER,
-            allowNull: false,
-            references: {
-                model: "Factions", 
-                key: "id"
-            },
-            onDelete: "CASCADE"
+            type: DataTypes.TEXT
         }
-    }, {
-        timestamps: true
     });
 
     Groupe.associate = (models) => {
-        Groupe.belongsTo(models.Faction, { foreignKey: "factionId" });
+        // Attributs dynamiques
+        Groupe.hasMany(models.Attribut, {
+            foreignKey: 'entiteId',
+            constraints: false,
+            scope: { entiteType: 'Groupe' },
+            as: 'attributs'
+        });
+
+        // Images
+        Groupe.hasMany(models.Image, {
+            foreignKey: 'entiteId',
+            constraints: false,
+            scope: { entiteType: 'Groupe' },
+            as: 'images'
+        });
+
+        // Appartenance à une faction
+        Groupe.belongsTo(models.Faction, {
+            foreignKey: 'FactionId',
+            as: 'faction'
+        });
+
+        // Personnages associés
+        Groupe.belongsToMany(models.Personnage, {
+            through: 'PersonnageGroupe',
+            as: 'personnages'
+        });
     };
 
     return Groupe;

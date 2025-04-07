@@ -11,7 +11,7 @@ module.exports = (sequelize, DataTypes) => {
         nom: {
             type: DataTypes.STRING
         },
-        chemin: {
+        url: { // anciennement "chemin"
             type: DataTypes.STRING,
             allowNull: false
         },
@@ -20,6 +20,5 @@ module.exports = (sequelize, DataTypes) => {
         }
     });
 
-    // Pas de relation directe car on utilise entiteId + entiteType
     return Image;
 };

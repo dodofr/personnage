@@ -1,32 +1,43 @@
-const upload = require('../upload/upload');
+module.exports = (sequelize, DataTypes) => {
+    const Equipement = sequelize.define('Equipement', {
+        nom: {
+            type: DataTypes.STRING,
+            allowNull: false
+        },
+        description: {
+            type: DataTypes.TEXT
+        }
+    });
 
-const {
-    creerEquipement,
-    obtenirTousLesEquipements,
-    obtenirEquipementParId,
-    mettreAJourEquipement,
-    supprimerEquipement
-} = require('../controllers/equipementController');
+    Equipement.associate = (models) => {
+        // Attributs dynamiques
+        Equipement.hasMany(models.Attribut, {
+            foreignKey: 'entiteId',
+            constraints: false,
+            scope: {
+                entiteType: 'Equipement'
+            },
+            as: 'attributs'
+        });
 
-module.exports = (app) => {
-    // Route pour créer un équipement avec téléchargement de plusieurs images
-    app.post("/api/equipements",
-        upload.array('images', 10),
-        creerEquipement
-    );
+        // Images liées
+        Equipement.hasMany(models.Image, {
+            foreignKey: 'entiteId',
+            constraints: false,
+            scope: {
+                entiteType: 'Equipement'
+            },
+            as: 'images'
+        });
 
-    // Route pour obtenir tous les équipements
-    app.get('/api/equipements', obtenirTousLesEquipements);
+        // Relation avec Personnage (un personnage peut posséder plusieurs équipements)
+        Equipement.belongsToMany(models.Personnage, {
+            through: 'PersonnageEquipement', // Table de liaison
+            foreignKey: 'equipementId',
+            otherKey: 'personnageId',
+            as: 'personnages'
+        });
+    };
 
-    // Route pour obtenir un équipement par ID
-    app.get('/api/equipements/:id', obtenirEquipementParId);
-
-    // Route pour mettre à jour un équipement avec téléchargement de plusieurs images
-    app.put("/api/equipements/:id",
-        upload.array('images', 10),
-        mettreAJourEquipement
-    );
-
-    // Route pour supprimer un équipement
-    app.delete('/api/equipements/:id', supprimerEquipement);
+    return Equipement;
 };
