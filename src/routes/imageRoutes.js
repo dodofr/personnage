@@ -1,26 +1,32 @@
-const upload = require('../upload/upload'); // Middleware multer
-
+const upload = require('../upload/upload');
 const {
-    creerImage,
-    obtenirToutesLesImages,
+    ajouterImages,
+    supprimerImage,
+    listerImages,
     obtenirImageParId,
-    mettreAJourImage,
-    supprimerImage
+    mettreAJourImage
 } = require('../controllers/imageController');
 
 module.exports = (app) => {
-    // Créer une image
-    app.post('/api/images', upload.single('image'), creerImage);
+    app.post('/api/images',
+        upload.fields([
+            { name: 'imagePrincipale', maxCount: 1 },
+            { name: 'imagesSecondaires', maxCount: 10 }
+        ]),
+        ajouterImages
+    );
 
-    // Lire toutes les images
-    app.get('/api/images', obtenirToutesLesImages);
-
-    // Lire une image par ID
+    app.get('/api/images', listerImages);
     app.get('/api/images/:id', obtenirImageParId);
 
-    // Modifier une image
-    app.put('/api/images/:id', upload.single('image'), mettreAJourImage);
+    app.put('/api/images/:id',
+        upload.fields([
+            { name: 'imagePrincipale', maxCount: 1 },
+            { name: 'imagesSecondaires', maxCount: 1 } // Pour mise à jour, une seule à la fois
+        ]),
+        mettreAJourImage
+    );
 
-    // Supprimer une image
     app.delete('/api/images/:id', supprimerImage);
 };
+

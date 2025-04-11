@@ -1,253 +1,271 @@
-const {
-    Personnage, Faction, Groupe, Planete, Pouvoir,
-    Vehicule, Equipement, Attribut, Image
-} = require('../db/sequelize');
-const path = require('path');
+const { Personnage, Attribut, Image, Planete, Vehicule, Faction, Pouvoir, Groupe, Equipement } = require('../db/sequelize');
+const { resolveUploadPathFromDB } = require('../utils/fileHelper');
+const { getUploadPath } = require('../utils/getUploadPath');
 const fs = require('fs');
-const { supprimerImagesEtAttributsParEntite } = require('../utils/suppressionUtils');
-async function creerPersonnage(req, res) {
+const path = require('path');
+
+const pathForDB = (file, req) => {
+    const fullPath = getUploadPath(req, file);
+    const relativeDir = fullPath.replace(/^src[\\/]/, 'uploads/');
+    return path.posix.join(relativeDir, file.filename);
+};
+
+const creerPersonnage = async (req, res) => {
     try {
-        const {
-            nom, descriptif, stats, factions, groupes,
-            planetes, pouvoirs, vehicules, equipements, attributs
-        } = req.body;
+        const { nom, stats, descriptif, attributs, planetes, vehicules, factions, pouvoirs, groupes, equipements, imagePrincipale, imagesSecondaires } = req.body;
+
+        // Vérification de l'existence des entités par nom et création si nécessaire
+        const verifyOrCreate = async (model, name) => {
+            let entity = await model.findOne({ where: { nom: name } });
+            if (!entity) {
+                entity = await model.create({ nom: name });
+            }
+            return entity;
+        };
 
         // Création du personnage
         const personnage = await Personnage.create({
             nom,
-            descriptif,
-            stats: stats ? JSON.parse(stats) : null
+            stats,
+            descriptif
         });
 
-        // Associations simples (many-to-many)
-        if (factions) await personnage.setFactions(JSON.parse(factions));
-        if (groupes) await personnage.setGroupes(JSON.parse(groupes));
-        if (planetes) await personnage.setPlanetes(JSON.parse(planetes));
-        if (pouvoirs) await personnage.setPouvoirs(JSON.parse(pouvoirs));
-        if (vehicules) await personnage.setVehicules(JSON.parse(vehicules));
-        if (equipements) await personnage.setEquipements(JSON.parse(equipements));
+        // Rattacher les relations avec les entités existantes ou créées
+        const planetesAssociations = await Promise.all(planetes.map(async (name) => {
+            const planete = await verifyOrCreate(Planete, name);
+            return planete.id;
+        }));
 
-        // Attributs dynamiques (one-to-many avec entiteId/entiteType)
-        if (attributs) {
-            const parsed = JSON.parse(attributs);
-            for (const attr of parsed) {
+        const vehiculesAssociations = await Promise.all(vehicules.map(async (name) => {
+            const vehicule = await verifyOrCreate(Vehicule, name);
+            return vehicule.id;
+        }));
+
+        const factionsAssociations = await Promise.all(factions.map(async (name) => {
+            const faction = await verifyOrCreate(Faction, name);
+            return faction.id;
+        }));
+
+        const pouvoirsAssociations = await Promise.all(pouvoirs.map(async (name) => {
+            const pouvoir = await verifyOrCreate(Pouvoir, name);
+            return pouvoir.id;
+        }));
+
+        const groupesAssociations = await Promise.all(groupes.map(async (name) => {
+            const groupe = await verifyOrCreate(Groupe, name);
+            return groupe.id;
+        }));
+
+        const equipementsAssociations = await Promise.all(equipements.map(async (name) => {
+            const equipement = await verifyOrCreate(Equipement, name);
+            return equipement.id;
+        }));
+
+        // Mise à jour des relations
+        await personnage.setPlanetes(planetesAssociations);
+        await personnage.setVehicules(vehiculesAssociations);
+        await personnage.setFactions(factionsAssociations);
+        await personnage.setPouvoirs(pouvoirsAssociations);
+        await personnage.setGroupes(groupesAssociations);
+        await personnage.setEquipements(equipementsAssociations);
+
+        // Gestion des attributs dynamiques
+        if (attributs && Array.isArray(attributs)) {
+            for (const attribut of attributs) {
                 await Attribut.create({
+                    nom: attribut.nom,
+                    valeur: attribut.valeur,
                     entiteId: personnage.id,
-                    entiteType: 'Personnage',
-                    nom: attr.nom,
-                    valeur: attr.valeur
+                    entiteType: 'Personnage'
                 });
             }
         }
 
-        // Images (upload via req.files)
-        const images = req.files?.['images'] ?? [];
-        for (const file of images) {
-            await Image.create({
-                entiteId: personnage.id,
-                entiteType: 'Personnage',
-                url: `uploads/personnages/${file.filename}`,
-                type: 'principal'
+        // Gérer les images
+        if (imagePrincipale) {
+            await personnage.createImage({
+                nom: imagePrincipale.originalname,
+                chemin: imagePrincipale.path,
+                type: imagePrincipale.mimetype,
+                imagePrincipale: true
             });
+        }
+
+        if (imagesSecondaires && Array.isArray(imagesSecondaires)) {
+            for (const image of imagesSecondaires) {
+                await personnage.createImage({
+                    nom: image.originalname,
+                    chemin: image.path,
+                    type: image.mimetype,
+                    imagePrincipale: false
+                });
+            }
         }
 
         res.status(201).json(personnage);
     } catch (error) {
         console.error(error);
-        res.status(500).json({ message: "Erreur lors de la création du personnage." });
+        res.status(500).json({ message: 'Erreur lors de la création du personnage.' });
     }
-}
+};
+
 
 async function obtenirTousLesPersonnages(req, res) {
     try {
         const personnages = await Personnage.findAll({
             include: [
-                { model: Faction },
-                { model: Groupe },
-                { model: Planete },
-                { model: Pouvoir },
-                { model: Vehicule },
-                { model: Equipement },
-                {
-                    model: Attribut,
-                    where: { entiteType: 'Personnage' },
-                    required: false
-                },
-                {
-                    model: Image,
-                    where: { entiteType: 'Personnage' },
-                    required: false
-                }
+                { model: Attribut, where: { entiteType: 'Personnage' }, required: false },
+                { model: Image, where: { entiteType: 'Personnage' }, required: false },
+                Planete, Vehicule, Faction, Pouvoir, Groupe, Equipement
             ]
         });
-
         res.status(200).json(personnages);
     } catch (error) {
-        res.status(500).json({ message: "Erreur lors de la récupération des personnages." });
+        console.error("Erreur récupération personnages :", error);
+        res.status(500).json({ message: "Erreur serveur" });
     }
 }
 
 async function obtenirPersonnageParId(req, res) {
     try {
-        const { id } = req.params;
-        const personnage = await Personnage.findByPk(id, {
+        const personnage = await Personnage.findByPk(req.params.id, {
             include: [
-                { model: Faction },
-                { model: Groupe },
-                { model: Planete },
-                { model: Pouvoir },
-                { model: Vehicule },
-                { model: Equipement },
-                {
-                    model: Attribut,
-                    where: { entiteType: 'Personnage' },
-                    required: false
-                },
-                {
-                    model: Image,
-                    where: { entiteType: 'Personnage' },
-                    required: false
-                }
+                { model: Attribut, where: { entiteType: 'Personnage' }, required: false },
+                { model: Image, where: { entiteType: 'Personnage' }, required: false },
+                Planete, Vehicule, Faction, Pouvoir, Groupe, Equipement
             ]
         });
 
         if (!personnage) {
-            return res.status(404).json({ message: "Personnage non trouvé." });
+            return res.status(404).json({ message: "Personnage introuvable" });
         }
 
         res.status(200).json(personnage);
     } catch (error) {
-        res.status(500).json({ message: "Erreur lors de la récupération du personnage." });
+        console.error("Erreur récupération personnage :", error);
+        res.status(500).json({ message: "Erreur serveur" });
     }
 }
 
-async function supprimerPersonnage(req, res) {
-    try {
-        const personnage = await Personnage.findByPk(req.params.id, {
-            include: [{ model: Image, where: { entiteType: 'Personnage' }, required: false }]
-        });
-
-        if (!personnage) {
-            return res.status(404).json({ message: "Personnage non trouvé" });
-        }
-
-        // Supprimer images et attributs associés
-        await supprimerImagesEtAttributsParEntite('Personnage', personnage.id);
-
-        // Supprimer le personnage
-        await personnage.destroy();
-
-        res.status(200).json({ message: "Personnage supprimé avec succès" });
-    } catch (error) {
-        console.error("Erreur suppression personnage :", error);
-        res.status(500).json({ message: "Erreur serveur" });
-    }
-};
 async function mettreAJourPersonnage(req, res) {
     try {
-        const { id } = req.params;
-        const {
-            nom, descriptif, stats, factions, groupes,
-            planetes, pouvoirs, vehicules, equipements, attributs
-        } = req.body;
+        const { nom, stats, descriptif, attributs, planetes, vehicules, factions, pouvoirs, groupes, equipements } = req.body;
 
-        const personnage = await Personnage.findByPk(id, {
-            include: [
-                { model: Faction },
-                { model: Groupe },
-                { model: Planete },
-                { model: Pouvoir },
-                { model: Vehicule },
-                { model: Equipement },
-                { model: Attribut },
-                { model: Image }
-            ]
-        });
+        const personnage = await Personnage.findByPk(req.params.id);
+        if (!personnage) return res.status(404).json({ message: "Personnage introuvable" });
 
-        if (!personnage) {
-            return res.status(404).json({ message: "Personnage non trouvé." });
-        }
-
-        // Mise à jour des informations du personnage
         await personnage.update({
             nom,
-            descriptif,
-            stats: stats ? JSON.parse(stats) : null
+            stats: stats ? JSON.parse(stats) : null,
+            descriptif
         });
 
-        // Mise à jour des associations many-to-many
-        if (factions) await personnage.setFactions(JSON.parse(factions));
-        if (groupes) await personnage.setGroupes(JSON.parse(groupes));
-        if (planetes) await personnage.setPlanetes(JSON.parse(planetes));
-        if (pouvoirs) await personnage.setPouvoirs(JSON.parse(pouvoirs));
-        if (vehicules) await personnage.setVehicules(JSON.parse(vehicules));
-        if (equipements) await personnage.setEquipements(JSON.parse(equipements));
-
-        // Mise à jour des attributs dynamiques (one-to-many)
+        await Attribut.destroy({ where: { entiteId: personnage.id, entiteType: 'Personnage' } });
         if (attributs) {
-            // Supprimer les anciens attributs avant de créer les nouveaux
-            await Attribut.destroy({ where: { entiteId: personnage.id, entiteType: 'Personnage' } });
-
-            const parsedAttributs = JSON.parse(attributs);
-            for (const attr of parsedAttributs) {
+            const attributsArray = JSON.parse(attributs);
+            for (const attr of attributsArray) {
                 await Attribut.create({
-                    entiteId: personnage.id,
                     entiteType: 'Personnage',
+                    entiteId: personnage.id,
                     nom: attr.nom,
                     valeur: attr.valeur
                 });
             }
         }
 
-        // Mise à jour des images (upload via req.files)
-        const images = req.files?.['images'] ?? [];
-        if (images.length > 0) {
-            // Supprimer les anciennes images sur disque
-            for (const img of personnage.Images ?? []) {
-                const imagePath = path.join(__dirname, '../../uploads/personnages', path.basename(img.url));
-                if (fs.existsSync(imagePath)) {
-                    fs.unlinkSync(imagePath);
-                }
-                await img.destroy();
-            }
+        const images = await Image.findAll({ where: { entiteType: 'Personnage', entiteId: personnage.id } });
+        for (const image of images) {
+            const imagePath = resolveUploadPathFromDB(image);
+            if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
+            await image.destroy();
+        }
 
-            // Ajouter les nouvelles images
-            for (const file of images) {
+        if (req.files.imagePrincipale) {
+            await Image.create({
+                entiteType: 'Personnage',
+                entiteId: personnage.id,
+                url: `/${pathForDB(req.files.imagePrincipale[0], req)}`,
+                type: 'principale'
+            });
+        }
+
+        if (req.files.imagesSecondaires) {
+            for (const file of req.files.imagesSecondaires) {
                 await Image.create({
-                    entiteId: personnage.id,
                     entiteType: 'Personnage',
-                    url: `uploads/personnages/${file.filename}`,
-                    type: 'principal'
+                    entiteId: personnage.id,
+                    url: `/${pathForDB(file, req)}`,
+                    type: 'secondaire'
                 });
             }
         }
 
-        // Récupérer le personnage mis à jour avec ses associations
-        const updatedPersonnage = await Personnage.findByPk(id, {
-            include: [
-                { model: Faction },
-                { model: Groupe },
-                { model: Planete },
-                { model: Pouvoir },
-                { model: Vehicule },
-                { model: Equipement },
-                { model: Attribut },
-                { model: Image }
-            ]
-        });
+        await personnage.setPlanetes([]);
+        await personnage.setVehicules([]);
+        await personnage.setFactions([]);
+        await personnage.setPouvoirs([]);
+        await personnage.setGroupes([]);
+        await personnage.setEquipements([]);
 
-        res.status(200).json(updatedPersonnage);
+        const relations = {
+            Planete: planetes,
+            Vehicule: vehicules,
+            Faction: factions,
+            Pouvoir: pouvoirs,
+            Groupe: groupes,
+            Equipement: equipements
+        };
+
+        for (const [modelName, value] of Object.entries(relations)) {
+            if (value) {
+                const ids = JSON.parse(value);
+                for (const id of ids) {
+                    const instance = await eval(modelName).findByPk(id);
+                    if (instance) await personnage[`add${modelName}`](instance);
+                }
+            }
+        }
+
+        res.status(200).json(personnage);
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: "Erreur lors de la mise à jour du personnage." });
+        console.error("Erreur mise à jour personnage :", error);
+        res.status(500).json({ message: "Erreur serveur" });
     }
 }
 
+async function supprimerPersonnage(req, res) {
+    try {
+        const personnage = await Personnage.findByPk(req.params.id);
+        if (!personnage) return res.status(404).json({ message: "Personnage introuvable" });
+
+        await personnage.setPlanetes([]);
+        await personnage.setVehicules([]);
+        await personnage.setFactions([]);
+        await personnage.setPouvoirs([]);
+        await personnage.setGroupes([]);
+        await personnage.setEquipements([]);
+
+        await Attribut.destroy({ where: { entiteId: personnage.id, entiteType: 'Personnage' } });
+
+        const images = await Image.findAll({ where: { entiteType: 'Personnage', entiteId: personnage.id } });
+        for (const image of images) {
+            const imagePath = resolveUploadPathFromDB(image);
+            if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
+            await image.destroy();
+        }
+
+        await personnage.destroy();
+        res.status(200).json({ message: "Personnage supprimé avec succès" });
+    } catch (error) {
+        console.error("Erreur suppression personnage :", error);
+        res.status(500).json({ message: "Erreur serveur" });
+    }
+}
 
 module.exports = {
     creerPersonnage,
     obtenirTousLesPersonnages,
     obtenirPersonnageParId,
-    supprimerPersonnage,
-    mettreAJourPersonnage
+    mettreAJourPersonnage,
+    supprimerPersonnage
 };

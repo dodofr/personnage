@@ -21,6 +21,11 @@ require('./src/routes/planeteRoutes')(app);
 require('./src/routes/equipementroutes')(app);
 require('./src/routes/vehiculeRoutes')(app);
 require('./src/routes/pouvoirRoutes')(app);
+require('./src/routes/factionRoutes')(app);
+require('./src/routes/groupeRoutes')(app);
+require('./src/routes/attributRoutes')(app);
+require('./src/routes/imageRoutes')(app);
+require('./src/routes/personnageRoutes')(app);
 
 //remet tout a 0
 //sequelize.initDb()

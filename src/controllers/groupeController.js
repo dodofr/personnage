@@ -1,16 +1,26 @@
-const { Groupe, Attribut, Image, Personnage } = require('../models');
+const { Groupe, Attribut, Image, Personnage, Faction } = require('../db/sequelize');
+const { resolveUploadPathFromDB } = require('../utils/fileHelper');
+const { getUploadPath } = require('../utils/getUploadPath');
 const fs = require('fs');
 const path = require('path');
 
-// Créer un groupe
-exports.creerGroupe = async (req, res) => {
+const pathForDB = (file, req) => {
+    const fullPath = getUploadPath(req, file);
+    const relativeDir = fullPath.replace(/^src[\\/]/, 'uploads/');
+    return path.posix.join(relativeDir, file.filename);
+};
+
+async function creerGroupe(req, res) {
     try {
-        const { nom, description, attributs, personnages } = req.body;
-        const groupe = await Groupe.create({ nom, description });
+        const { nom, description, attributs, personnages, FactionId } = req.body;
+        const imagePrincipale = req.files.imagePrincipale?.[0] || null;
+        const imagesSecondaires = req.files.imagesSecondaires || [];
+
+        const groupe = await Groupe.create({ nom, description, FactionId });
 
         if (attributs) {
-            const attributsArray = JSON.parse(attributs);
-            for (const attr of attributsArray) {
+            const parsed = JSON.parse(attributs);
+            for (const attr of parsed) {
                 await Attribut.create({
                     entiteType: 'Groupe',
                     entiteId: groupe.id,
@@ -20,83 +30,89 @@ exports.creerGroupe = async (req, res) => {
             }
         }
 
-        if (req.files && req.files.length > 0) {
-            for (const file of req.files) {
-                await Image.create({
-                    entiteType: 'Groupe',
-                    entiteId: groupe.id,
-                    url: `/uploads/${file.filename}`,
-                    type: 'secondaire'
-                });
-            }
+        if (imagePrincipale) {
+            await Image.create({
+                entiteType: 'Groupe',
+                entiteId: groupe.id,
+                url: `/${pathForDB(imagePrincipale, req)}`,
+                type: 'principale'
+            });
+        }
+
+        for (const file of imagesSecondaires) {
+            await Image.create({
+                entiteType: 'Groupe',
+                entiteId: groupe.id,
+                url: `/${pathForDB(file, req)}`,
+                type: 'secondaire'
+            });
         }
 
         if (personnages) {
             const personnagesArray = JSON.parse(personnages);
             for (const personnageId of personnagesArray) {
                 const personnage = await Personnage.findByPk(personnageId);
-                if (personnage) {
-                    await groupe.addPersonnage(personnage);
-                }
+                if (personnage) await groupe.addPersonnage(personnage);
             }
         }
 
         res.status(201).json(groupe);
     } catch (error) {
         console.error("Erreur création groupe :", error);
-        res.status(500).json({ message: "Erreur serveur" });
+        res.status(500).json({ message: "Erreur serveur lors de la création du groupe." });
     }
-};
+}
 
-// Obtenir tous les groupes
-exports.obtenirTousLesGroupes = async (req, res) => {
+async function obtenirTousLesGroupes(req, res) {
     try {
         const groupes = await Groupe.findAll({
-            include: ['attributs', 'images', 'personnages']
+            include: [
+                { model: Personnage, as: 'personnages' },
+                { model: Attribut, as: 'attributs', where: { entiteType: 'Groupe' }, required: false },
+                { model: Image, as: 'images', where: { entiteType: 'Groupe' }, required: false },
+                { model: Faction, as: 'faction' }
+            ]
         });
         res.status(200).json(groupes);
     } catch (error) {
         console.error("Erreur récupération groupes :", error);
         res.status(500).json({ message: "Erreur serveur" });
     }
-};
+}
 
-// Obtenir un groupe par ID
-exports.obtenirGroupeParId = async (req, res) => {
+async function obtenirGroupeParId(req, res) {
     try {
         const groupe = await Groupe.findByPk(req.params.id, {
-            include: ['attributs', 'images', 'personnages']
+            include: [
+                { model: Attribut, as: 'attributs', where: { entiteType: 'Groupe' }, required: false },
+                { model: Image, as: 'images', where: { entiteType: 'Groupe' }, required: false },
+                { model: Personnage, as: 'personnages', through: { attributes: [] } },
+                { model: Faction, as: 'faction' }
+            ]
         });
 
-        if (!groupe) {
-            return res.status(404).json({ message: "Groupe introuvable" });
-        }
+        if (!groupe) return res.status(404).json({ message: "Groupe introuvable" });
 
         res.status(200).json(groupe);
     } catch (error) {
         console.error("Erreur récupération groupe :", error);
         res.status(500).json({ message: "Erreur serveur" });
     }
-};
+}
 
-// Mettre à jour un groupe
-exports.mettreAJourGroupe = async (req, res) => {
+async function mettreAJourGroupe(req, res) {
     try {
-        const { nom, description, attributs, personnages } = req.body;
+        const { nom, description, attributs, personnages, FactionId } = req.body;
+
         const groupe = await Groupe.findByPk(req.params.id);
+        if (!groupe) return res.status(404).json({ message: "Groupe introuvable" });
 
-        if (!groupe) {
-            return res.status(404).json({ message: "Groupe introuvable" });
-        }
-
-        await groupe.update({ nom, description });
+        await groupe.update({ nom, description, FactionId });
 
         if (attributs) {
-            await Attribut.destroy({
-                where: { entiteId: groupe.id, entiteType: 'Groupe' }
-            });
-            const attributsArray = JSON.parse(attributs);
-            for (const attr of attributsArray) {
+            await Attribut.destroy({ where: { entiteId: groupe.id, entiteType: 'Groupe' } });
+            const parsed = JSON.parse(attributs);
+            for (const attr of parsed) {
                 await Attribut.create({
                     entiteType: 'Groupe',
                     entiteId: groupe.id,
@@ -106,12 +122,31 @@ exports.mettreAJourGroupe = async (req, res) => {
             }
         }
 
-        if (req.files && req.files.length > 0) {
-            for (const file of req.files) {
+        const images = await Image.findAll({
+            where: { entiteType: 'Groupe', entiteId: groupe.id }
+        });
+
+        for (const image of images) {
+            const imagePath = resolveUploadPathFromDB(image);
+            if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
+            await image.destroy();
+        }
+
+        if (req.files?.imagePrincipale) {
+            await Image.create({
+                entiteType: 'Groupe',
+                entiteId: groupe.id,
+                url: `/${pathForDB(req.files.imagePrincipale[0], req)}`,
+                type: 'principale'
+            });
+        }
+
+        if (req.files?.imagesSecondaires) {
+            for (const file of req.files.imagesSecondaires) {
                 await Image.create({
                     entiteType: 'Groupe',
                     entiteId: groupe.id,
-                    url: `/uploads/${file.filename}`,
+                    url: `/${pathForDB(file, req)}`,
                     type: 'secondaire'
                 });
             }
@@ -122,48 +157,51 @@ exports.mettreAJourGroupe = async (req, res) => {
             await groupe.setPersonnages([]);
             for (const personnageId of personnagesArray) {
                 const personnage = await Personnage.findByPk(personnageId);
-                if (personnage) {
-                    await groupe.addPersonnage(personnage);
-                }
+                if (personnage) await groupe.addPersonnage(personnage);
             }
         }
 
         res.status(200).json(groupe);
     } catch (error) {
         console.error("Erreur mise à jour groupe :", error);
-        res.status(500).json({ message: "Erreur serveur" });
+        res.status(500).json({ message: "Erreur serveur lors de la mise à jour du groupe." });
     }
-};
+}
 
-// Supprimer un groupe
-exports.supprimerGroupe = async (req, res) => {
+async function supprimerGroupe(req, res) {
     try {
-        const groupe = await Groupe.findByPk(req.params.id);
+        const id = req.params.id;
+        const groupe = await Groupe.findByPk(id, {
+            include: [{ model: Personnage, as: 'personnages' }]
+        });
 
-        if (!groupe) {
-            return res.status(404).json({ message: "Groupe introuvable" });
-        }
+        if (!groupe) return res.status(404).json({ message: "Groupe introuvable" });
+
+        await groupe.setPersonnages([]);
+        await Attribut.destroy({ where: { entiteType: 'Groupe', entiteId: groupe.id } });
 
         const images = await Image.findAll({
-            where: { entiteId: groupe.id, entiteType: 'Groupe' }
+            where: { entiteType: 'Groupe', entiteId: groupe.id }
         });
 
         for (const image of images) {
-            const filePath = path.join(__dirname, '..', image.url);
-            if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+            const imagePath = resolveUploadPathFromDB(image);
+            if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
             await image.destroy();
         }
 
-        await Attribut.destroy({
-            where: { entiteId: groupe.id, entiteType: 'Groupe' }
-        });
-
-        await groupe.setPersonnages([]);
         await groupe.destroy();
-
-        res.status(200).json({ message: "Groupe supprimé avec succès" });
+        res.status(200).json({ message: 'Groupe supprimé avec succès' });
     } catch (error) {
         console.error("Erreur suppression groupe :", error);
         res.status(500).json({ message: "Erreur serveur" });
     }
+}
+
+module.exports = {
+    creerGroupe,
+    obtenirTousLesGroupes,
+    obtenirGroupeParId,
+    mettreAJourGroupe,
+    supprimerGroupe
 };
