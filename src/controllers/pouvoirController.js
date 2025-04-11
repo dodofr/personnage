@@ -1,10 +1,20 @@
-const { Pouvoir, Attribut, Image, Personnage } = require('../models');
-const { Op } = require('sequelize');
+const { Pouvoir, Attribut, Image, Personnage } = require('../db/sequelize');
+const { resolveUploadPathFromDB } = require('../utils/fileHelper');
+const { getUploadPath } = require('../utils/getUploadPath');
+const fs = require('fs');
+const path = require('path');
 
-// ✅ Créer un pouvoir
-exports.creerPouvoir = async (req, res) => {
+const pathForDB = (file, req) => {
+    const fullPath = getUploadPath(req, file);
+    const relativeDir = fullPath.replace(/^src[\\/]/, 'uploads/');
+    return path.posix.join(relativeDir, file.filename);
+};
+
+async function creerPouvoir(req, res) {
     try {
         const { nom, description, attributs, personnages } = req.body;
+        const imagePrincipale = req.files.imagePrincipale?.[0] || null;
+        const imagesSecondaires = req.files.imagesSecondaires || [];
 
         const pouvoir = await Pouvoir.create({ nom, description });
 
@@ -20,88 +30,84 @@ exports.creerPouvoir = async (req, res) => {
             }
         }
 
-        if (req.files && req.files.length > 0) {
-            for (const file of req.files) {
-                await Image.create({
-                    entiteType: 'Pouvoir',
-                    entiteId: pouvoir.id,
-                    url: `/uploads/${file.filename}`,
-                    type: 'secondaire'
-                });
-            }
+        if (imagePrincipale) {
+            await Image.create({
+                entiteType: 'Pouvoir',
+                entiteId: pouvoir.id,
+                url: `/${pathForDB(imagePrincipale, req)}`,
+                type: 'principale'
+            });
+        }
+
+        for (const file of imagesSecondaires) {
+            await Image.create({
+                entiteType: 'Pouvoir',
+                entiteId: pouvoir.id,
+                url: `/${pathForDB(file, req)}`,
+                type: 'secondaire'
+            });
         }
 
         if (personnages) {
             const personnagesArray = JSON.parse(personnages);
-            for (const personnageId of personnagesArray) {
-                const personnage = await Personnage.findByPk(personnageId);
-                if (personnage) {
-                    await pouvoir.addPersonnage(personnage);
-                }
+            for (const id of personnagesArray) {
+                const personnage = await Personnage.findByPk(id);
+                if (personnage) await pouvoir.addPersonnage(personnage);
             }
         }
 
         res.status(201).json(pouvoir);
     } catch (error) {
         console.error("Erreur création pouvoir :", error);
-        res.status(500).json({ message: "Erreur serveur" });
+        res.status(500).json({ message: "Erreur serveur lors de la création du pouvoir." });
     }
-};
+}
 
-// ✅ Obtenir tous les pouvoirs
-exports.obtenirTousLesPouvoirs = async (req, res) => {
+async function obtenirTousLesPouvoirs(req, res) {
     try {
         const pouvoirs = await Pouvoir.findAll({
             include: [
-                { model: Attribut, as: 'attributs' },
-                { model: Image, as: 'images' },
-                { model: Personnage, through: { attributes: [] } }
+                { model: Personnage, as: 'personnages' },
+                { model: Attribut, as: 'attributs', where: { entiteType: 'Pouvoir' }, required: false },
+                { model: Image, as: 'images', where: { entiteType: 'Pouvoir' }, required: false }
             ]
         });
-        res.json(pouvoirs);
+        res.status(200).json(pouvoirs);
     } catch (error) {
         console.error("Erreur récupération pouvoirs :", error);
         res.status(500).json({ message: "Erreur serveur" });
     }
-};
+}
 
-// ✅ Obtenir un pouvoir par ID
-exports.obtenirPouvoirParId = async (req, res) => {
+async function obtenirPouvoirParId(req, res) {
     try {
         const pouvoir = await Pouvoir.findByPk(req.params.id, {
             include: [
-                { model: Attribut, as: 'attributs' },
-                { model: Image, as: 'images' },
-                { model: Personnage, through: { attributes: [] } }
+                { model: Attribut, as: 'attributs', where: { entiteType: 'Pouvoir' }, required: false },
+                { model: Image, as: 'images', where: { entiteType: 'Pouvoir' }, required: false },
+                { model: Personnage, as: 'personnages', through: { attributes: [] } }
             ]
         });
 
-        if (!pouvoir) {
-            return res.status(404).json({ message: "Pouvoir introuvable" });
-        }
+        if (!pouvoir) return res.status(404).json({ message: "Pouvoir introuvable" });
 
-        res.json(pouvoir);
+        res.status(200).json(pouvoir);
     } catch (error) {
         console.error("Erreur récupération pouvoir :", error);
         res.status(500).json({ message: "Erreur serveur" });
     }
-};
+}
 
-// ✅ Mettre à jour un pouvoir
-exports.mettreAJourPouvoir = async (req, res) => {
+async function mettreAJourPouvoir(req, res) {
     try {
         const { nom, description, attributs, personnages } = req.body;
-
         const pouvoir = await Pouvoir.findByPk(req.params.id);
-        if (!pouvoir) {
-            return res.status(404).json({ message: "Pouvoir introuvable" });
-        }
+        if (!pouvoir) return res.status(404).json({ message: "Pouvoir introuvable" });
 
         await pouvoir.update({ nom, description });
 
         if (attributs) {
-            await Attribut.destroy({ where: { entiteId: pouvoir.id, entiteType: 'Pouvoir' } });
-
+            await Attribut.destroy({ where: { entiteType: 'Pouvoir', entiteId: pouvoir.id } });
             const attributsArray = JSON.parse(attributs);
             for (const attr of attributsArray) {
                 await Attribut.create({
@@ -113,12 +119,29 @@ exports.mettreAJourPouvoir = async (req, res) => {
             }
         }
 
-        if (req.files && req.files.length > 0) {
-            for (const file of req.files) {
+        const images = await Image.findAll({ where: { entiteType: 'Pouvoir', entiteId: pouvoir.id } });
+        for (const image of images) {
+            const imagePath = resolveUploadPathFromDB(image);
+            if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
+            await image.destroy();
+        }
+
+        if (req.files?.imagePrincipale) {
+            const imagePrincipale = req.files.imagePrincipale[0];
+            await Image.create({
+                entiteType: 'Pouvoir',
+                entiteId: pouvoir.id,
+                url: `/${pathForDB(imagePrincipale, req)}`,
+                type: 'principale'
+            });
+        }
+
+        if (req.files?.imagesSecondaires) {
+            for (const file of req.files.imagesSecondaires) {
                 await Image.create({
                     entiteType: 'Pouvoir',
                     entiteId: pouvoir.id,
-                    url: `/uploads/${file.filename}`,
+                    url: `/${pathForDB(file, req)}`,
                     type: 'secondaire'
                 });
             }
@@ -127,38 +150,49 @@ exports.mettreAJourPouvoir = async (req, res) => {
         if (personnages) {
             const personnagesArray = JSON.parse(personnages);
             await pouvoir.setPersonnages([]);
-            for (const personnageId of personnagesArray) {
-                const personnage = await Personnage.findByPk(personnageId);
-                if (personnage) {
-                    await pouvoir.addPersonnage(personnage);
-                }
+            for (const id of personnagesArray) {
+                const personnage = await Personnage.findByPk(id);
+                if (personnage) await pouvoir.addPersonnage(personnage);
             }
         }
 
-        res.json(pouvoir);
+        res.status(200).json(pouvoir);
     } catch (error) {
         console.error("Erreur mise à jour pouvoir :", error);
         res.status(500).json({ message: "Erreur serveur" });
     }
-};
+}
 
-// ✅ Supprimer un pouvoir
-exports.supprimerPouvoir = async (req, res) => {
+async function supprimerPouvoir(req, res) {
     try {
-        const pouvoir = await Pouvoir.findByPk(req.params.id);
-        if (!pouvoir) {
-            return res.status(404).json({ message: "Pouvoir introuvable" });
-        }
+        const pouvoir = await Pouvoir.findByPk(req.params.id, {
+            include: [{ model: Personnage, as: 'personnages' }]
+        });
 
-        await Attribut.destroy({ where: { entiteId: pouvoir.id, entiteType: 'Pouvoir' } });
-        await Image.destroy({ where: { entiteId: pouvoir.id, entiteType: 'Pouvoir' } });
+        if (!pouvoir) return res.status(404).json({ message: "Pouvoir introuvable" });
 
         await pouvoir.setPersonnages([]);
-        await pouvoir.destroy();
+        await Attribut.destroy({ where: { entiteType: 'Pouvoir', entiteId: pouvoir.id } });
 
-        res.status(204).end();
+        const images = await Image.findAll({ where: { entiteType: 'Pouvoir', entiteId: pouvoir.id } });
+        for (const image of images) {
+            const imagePath = resolveUploadPathFromDB(image);
+            if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
+            await image.destroy();
+        }
+
+        await pouvoir.destroy();
+        res.status(200).json({ message: 'Pouvoir supprimé avec succès' });
     } catch (error) {
         console.error("Erreur suppression pouvoir :", error);
         res.status(500).json({ message: "Erreur serveur" });
     }
+}
+
+module.exports = {
+    creerPouvoir,
+    obtenirTousLesPouvoirs,
+    obtenirPouvoirParId,
+    mettreAJourPouvoir,
+    supprimerPouvoir
 };

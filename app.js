@@ -17,7 +17,10 @@ app.use(morgan('dev'));
 
 // Importer les routes
 require('./src/routes/personnageRoutes')(app);
-
+require('./src/routes/planeteRoutes')(app);
+require('./src/routes/equipementroutes')(app);
+require('./src/routes/vehiculeRoutes')(app);
+require('./src/routes/pouvoirRoutes')(app);
 
 //remet tout a 0
 //sequelize.initDb()

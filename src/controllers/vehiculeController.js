@@ -1,15 +1,23 @@
-const { Vehicule, Attribut, Image, Personnage } = require('../models');
+const { Vehicule, Attribut, Image, Personnage } = require('../db/sequelize');
+const { resolveUploadPathFromDB } = require('../utils/fileHelper');
+const { getUploadPath } = require('../utils/getUploadPath');
 const fs = require('fs');
 const path = require('path');
 
-// ✅ Créer un véhicule
-exports.creerVehicule = async (req, res) => {
+const pathForDB = (file, req) => {
+    const fullPath = getUploadPath(req, file);
+    const relativeDir = fullPath.replace(/^src[\\/]/, 'uploads/');
+    return path.posix.join(relativeDir, file.filename);
+};
+
+async function creerVehicule(req, res) {
     try {
         const { nom, description, attributs, personnages } = req.body;
+        const imagePrincipale = req.files.imagePrincipale?.[0] || null;
+        const imagesSecondaires = req.files.imagesSecondaires || [];
 
         const vehicule = await Vehicule.create({ nom, description });
 
-        // Attributs dynamiques
         if (attributs) {
             const attributsArray = JSON.parse(attributs);
             for (const attr of attributsArray) {
@@ -22,54 +30,64 @@ exports.creerVehicule = async (req, res) => {
             }
         }
 
-        // Images
-        if (req.files && req.files.length > 0) {
-            for (const file of req.files) {
-                await Image.create({
-                    entiteType: 'Vehicule',
-                    entiteId: vehicule.id,
-                    url: `/uploads/${file.filename}`,
-                    type: 'secondaire'
-                });
-            }
+        if (imagePrincipale) {
+            await Image.create({
+                entiteType: 'Vehicule',
+                entiteId: vehicule.id,
+                url: `/${pathForDB(imagePrincipale, req)}`,
+                type: 'principale'
+            });
         }
 
-        // Liens avec personnages
+        for (const file of imagesSecondaires) {
+            await Image.create({
+                entiteType: 'Vehicule',
+                entiteId: vehicule.id,
+                url: `/${pathForDB(file, req)}`,
+                type: 'secondaire'
+            });
+        }
+
         if (personnages) {
             const personnagesArray = JSON.parse(personnages);
-            for (const personnageId of personnagesArray) {
-                const personnage = await Personnage.findByPk(personnageId);
-                if (personnage) {
-                    await vehicule.addPersonnage(personnage);
-                }
+            for (const id of personnagesArray) {
+                const personnage = await Personnage.findByPk(id);
+                if (personnage) await vehicule.addPersonnage(personnage);
             }
         }
 
         res.status(201).json(vehicule);
     } catch (error) {
         console.error("Erreur création véhicule :", error);
-        res.status(500).json({ message: "Erreur serveur" });
+        res.status(500).json({ message: "Erreur serveur lors de la création du véhicule." });
     }
-};
+}
 
-// ✅ Obtenir tous les véhicules
-exports.obtenirTousLesVehicules = async (req, res) => {
+// Les autres fonctions sont similaires à équipement, avec "Vehicule" au lieu de "Equipement"
+async function obtenirTousLesVehicules(req, res) {
     try {
         const vehicules = await Vehicule.findAll({
-            include: ['attributs', 'images', 'Personnages']
+            include: [
+                { model: Personnage, as: 'personnages' },
+                { model: Attribut, as: 'attributs', where: { entiteType: 'Vehicule' }, required: false },
+                { model: Image, as: 'images', where: { entiteType: 'Vehicule' }, required: false }
+            ]
         });
         res.status(200).json(vehicules);
     } catch (error) {
         console.error("Erreur récupération véhicules :", error);
         res.status(500).json({ message: "Erreur serveur" });
     }
-};
+}
 
-// ✅ Obtenir un véhicule par ID
-exports.obtenirVehiculeParId = async (req, res) => {
+async function obtenirVehiculeParId(req, res) {
     try {
         const vehicule = await Vehicule.findByPk(req.params.id, {
-            include: ['attributs', 'images', 'Personnages']
+            include: [
+                { model: Attribut, as: 'attributs', where: { entiteType: 'Vehicule' }, required: false },
+                { model: Image, as: 'images', where: { entiteType: 'Vehicule' }, required: false },
+                { model: Personnage, as: 'personnages', through: { attributes: [] } }
+            ]
         });
 
         if (!vehicule) return res.status(404).json({ message: "Véhicule introuvable" });
@@ -79,24 +97,18 @@ exports.obtenirVehiculeParId = async (req, res) => {
         console.error("Erreur récupération véhicule :", error);
         res.status(500).json({ message: "Erreur serveur" });
     }
-};
+}
 
-// ✅ Mettre à jour un véhicule
-exports.mettreAJourVehicule = async (req, res) => {
+async function mettreAJourVehicule(req, res) {
     try {
         const { nom, description, attributs, personnages } = req.body;
-
         const vehicule = await Vehicule.findByPk(req.params.id);
         if (!vehicule) return res.status(404).json({ message: "Véhicule introuvable" });
 
         await vehicule.update({ nom, description });
 
-        // Mettre à jour les attributs
         if (attributs) {
-            await Attribut.destroy({
-                where: { entiteId: vehicule.id, entiteType: 'Vehicule' }
-            });
-
+            await Attribut.destroy({ where: { entiteType: 'Vehicule', entiteId: vehicule.id } });
             const attributsArray = JSON.parse(attributs);
             for (const attr of attributsArray) {
                 await Attribut.create({
@@ -108,27 +120,40 @@ exports.mettreAJourVehicule = async (req, res) => {
             }
         }
 
-        // Nouvelles images
-        if (req.files && req.files.length > 0) {
-            for (const file of req.files) {
+        const images = await Image.findAll({ where: { entiteType: 'Vehicule', entiteId: vehicule.id } });
+        for (const image of images) {
+            const imagePath = resolveUploadPathFromDB(image);
+            if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
+            await image.destroy();
+        }
+
+        if (req.files?.imagePrincipale) {
+            const imagePrincipale = req.files.imagePrincipale[0];
+            await Image.create({
+                entiteType: 'Vehicule',
+                entiteId: vehicule.id,
+                url: `/${pathForDB(imagePrincipale, req)}`,
+                type: 'principale'
+            });
+        }
+
+        if (req.files?.imagesSecondaires) {
+            for (const file of req.files.imagesSecondaires) {
                 await Image.create({
                     entiteType: 'Vehicule',
                     entiteId: vehicule.id,
-                    url: `/uploads/${file.filename}`,
+                    url: `/${pathForDB(file, req)}`,
                     type: 'secondaire'
                 });
             }
         }
 
-        // Mise à jour des liens avec personnages
         if (personnages) {
             const personnagesArray = JSON.parse(personnages);
             await vehicule.setPersonnages([]);
-            for (const personnageId of personnagesArray) {
-                const personnage = await Personnage.findByPk(personnageId);
-                if (personnage) {
-                    await vehicule.addPersonnage(personnage);
-                }
+            for (const id of personnagesArray) {
+                const personnage = await Personnage.findByPk(id);
+                if (personnage) await vehicule.addPersonnage(personnage);
             }
         }
 
@@ -137,32 +162,38 @@ exports.mettreAJourVehicule = async (req, res) => {
         console.error("Erreur mise à jour véhicule :", error);
         res.status(500).json({ message: "Erreur serveur" });
     }
-};
+}
 
-// ✅ Supprimer un véhicule
-exports.supprimerVehicule = async (req, res) => {
+async function supprimerVehicule(req, res) {
     try {
-        const vehicule = await Vehicule.findByPk(req.params.id);
-        if (!vehicule) return res.status(404).json({ message: "Véhicule introuvable" });
-
-        // Supprimer les images associées
-        const images = await Image.findAll({
-            where: { entiteId: vehicule.id, entiteType: 'Vehicule' }
+        const vehicule = await Vehicule.findByPk(req.params.id, {
+            include: [{ model: Personnage, as: 'personnages' }]
         });
 
+        if (!vehicule) return res.status(404).json({ message: "Véhicule introuvable" });
+
+        await vehicule.setPersonnages([]);
+        await Attribut.destroy({ where: { entiteType: 'Vehicule', entiteId: vehicule.id } });
+
+        const images = await Image.findAll({ where: { entiteType: 'Vehicule', entiteId: vehicule.id } });
         for (const image of images) {
-            const imagePath = path.join(__dirname, '..', image.url);
+            const imagePath = resolveUploadPathFromDB(image);
             if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
             await image.destroy();
         }
 
-        await Attribut.destroy({ where: { entiteId: vehicule.id, entiteType: 'Vehicule' } });
-        await vehicule.setPersonnages([]);
         await vehicule.destroy();
-
-        res.status(200).json({ message: "Véhicule supprimé avec succès" });
+        res.status(200).json({ message: 'Véhicule supprimé avec succès' });
     } catch (error) {
         console.error("Erreur suppression véhicule :", error);
         res.status(500).json({ message: "Erreur serveur" });
     }
+}
+
+module.exports = {
+    creerVehicule,
+    obtenirTousLesVehicules,
+    obtenirVehiculeParId,
+    mettreAJourVehicule,
+    supprimerVehicule
 };

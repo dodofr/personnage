@@ -10,8 +10,10 @@ const {
 
 module.exports = (app) => {
     app.post("/api/equipements",
-        upload.array('images', 10),
-        creerEquipement
+        upload.fields([
+            { name: 'imagePrincipale', maxCount: 1 },
+            { name: 'imagesSecondaires', maxCount: 10 }
+        ]),creerEquipement
     );
 
     app.get('/api/equipements', obtenirTousLesEquipements);
@@ -19,8 +21,10 @@ module.exports = (app) => {
     app.get('/api/equipements/:id', obtenirEquipementParId);
 
     app.put("/api/equipements/:id",
-        upload.array('images', 10),
-        mettreAJourEquipement
+        upload.fields([
+            { name: 'imagePrincipale', maxCount: 1 },
+            { name: 'imagesSecondaires', maxCount: 10 }
+        ]),mettreAJourEquipement
     );
 
     app.delete('/api/equipements/:id', supprimerEquipement);

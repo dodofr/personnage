@@ -2,31 +2,54 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// Définition des dossiers en fonction du type d'entité
+// Dictionnaire des dossiers (clé = nom dans l'URL, valeur = dossier final)
+const dossierMap = {
+    personnages: 'personnage',
+    equipements: 'equipement',
+    factions: 'faction',
+    groupes: 'groupe',
+    planetes: 'planete',
+    pouvoirs: 'pouvoir',
+    vehicules: 'vehicule',
+};
+
 const getUploadPath = (req, file) => {
+    console.log('--- MULTER DEBUG ---');
+    console.log('req.originalUrl:', req.originalUrl);
+    console.log('file.mimetype:', file.mimetype);
+
     if (file.mimetype.startsWith('image/')) {
-        if (req.baseUrl.includes('personnage')) return 'uploads/images/personnage/';
-        if (req.baseUrl.includes('equipement')) return 'uploads/images/equipement/';
-        if (req.baseUrl.includes('faction')) return 'uploads/images/faction/';
-        if (req.baseUrl.includes('groupe')) return 'uploads/images/groupe/';
-        if (req.baseUrl.includes('planete')) return 'uploads/images/planete/';
-        if (req.baseUrl.includes('pouvoir')) return 'uploads/images/pouvoir/';
-        if (req.baseUrl.includes('vehicule')) return 'uploads/images/vehicule/';
-        return 'uploads/images/autres/';
+        const segments = req.originalUrl.split('/');
+        const entite = segments.includes('planetes') ? 'planete' :
+                       segments.includes('personnages') ? 'personnage' :
+                       segments.includes('equipements') ? 'equipement' :
+                       segments.includes('factions') ? 'faction' :
+                       segments.includes('groupes') ? 'groupe' :
+                       segments.includes('pouvoirs') ? 'pouvoir' :
+                       segments.includes('vehicules') ? 'vehicule' :
+                       'autres';
+
+        const finalPath = `src/uploads/images/${entite}/`;
+        console.log('Destination image:', finalPath);
+        return finalPath;
     } else if (file.mimetype === 'application/pdf') {
-        return 'uploads/documents/';
+        console.log('Destination PDF: src/uploads/documents/');
+        return 'src/uploads/documents/';
     }
+
+    console.log('Fichier non supporté');
     return null;
 };
 
 // Création du dossier si inexistant
 const ensureDirectoryExistence = (filePath) => {
     if (!fs.existsSync(filePath)) {
+        console.log('Création du dossier:', filePath);
         fs.mkdirSync(filePath, { recursive: true });
     }
 };
 
-// Configuration du stockage des fichiers
+// Configuration du stockage
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         const uploadPath = getUploadPath(req, file);
@@ -38,16 +61,19 @@ const storage = multer.diskStorage({
         }
     },
     filename: (req, file, cb) => {
-        cb(null, `${Date.now()}-${file.originalname}`);
+        const finalName = `${Date.now()}-${file.originalname}`;
+        console.log('Nom du fichier sauvegardé:', finalName);
+        cb(null, finalName);
     }
 });
 
-// Filtrage des fichiers
+// Filtrage des types de fichiers
 const fileFilter = (req, file, cb) => {
     const allowedMimeTypes = ['image/jpeg', 'image/png', 'application/pdf'];
     if (allowedMimeTypes.includes(file.mimetype)) {
         cb(null, true);
     } else {
+        console.log('Type de fichier rejeté:', file.mimetype);
         cb(new Error('Format de fichier non supporté'), false);
     }
 };
