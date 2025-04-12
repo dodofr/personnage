@@ -33,8 +33,6 @@ module.exports = (sequelize, DataTypes) => {
         // Relation avec Personnage (un personnage peut posséder plusieurs équipements)
         Equipement.belongsToMany(models.Personnage, {
             through: 'PersonnageEquipement', // Table de liaison
-            foreignKey: 'equipementId',
-            otherKey: 'personnageId',
             as: 'personnages'
         });
     };

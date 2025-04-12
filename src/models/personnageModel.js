@@ -13,6 +13,15 @@ module.exports = (sequelize, DataTypes) => {
         Personnage.belongsToMany(models.Groupe, { through: 'PersonnageGroupe' });
         Personnage.belongsToMany(models.Equipement, { through: 'PersonnageEquipement' }); // ✅ Ajout Equipement
 
+        // Images liées
+        Personnage.hasMany(models.Image, {
+            foreignKey: 'entiteId',
+            constraints: false,
+            scope: {
+                entiteType: 'Personnage'
+            },
+            as: 'images'
+        });
         // Ajout des attributs dynamiques
         Personnage.hasMany(models.Attribut, {
             foreignKey: 'entiteId',
