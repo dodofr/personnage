@@ -1,6 +1,6 @@
 module.exports = (sequelize, DataTypes) => {
     const Personnage = sequelize.define('Personnage', {
-        nom: { type: DataTypes.STRING, allowNull: false },
+        nom: { type: DataTypes.STRING, allowNull: false, unique: true },
         stats: { type: DataTypes.JSON }, // Permet de stocker plusieurs stats (ex: force, intelligence...)
         descriptif: { type: DataTypes.TEXT }
     });

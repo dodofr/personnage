@@ -2,7 +2,8 @@ module.exports = (sequelize, DataTypes) => {
     const Faction = sequelize.define('Faction', {
         nom: {
             type: DataTypes.STRING,
-            allowNull: false
+            allowNull: false,
+            unique: true
         },
         description: {
             type: DataTypes.TEXT

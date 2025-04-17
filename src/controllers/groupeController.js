@@ -12,11 +12,38 @@ const pathForDB = (file, req) => {
 
 async function creerGroupe(req, res) {
     try {
-        const { nom, description, attributs, personnages, FactionId } = req.body;
+        const { nom, description, attributs, personnages, FactionId, factionNom } = req.body;
+
+        let factionIdFinal = FactionId;
+        
+       // Résoudre la faction (ID ou nom) et la créer si elle n'existe pas
+       if (!factionIdFinal && factionNom) {
+        let faction = await Faction.findOne({ where: { nom: factionNom } });
+
+        if (!faction) {
+            faction = await Faction.create({
+                nom: factionNom
+            });
+            console.log(`Faction créée : ${faction.nom}`);
+        }
+
+        factionIdFinal = faction.id;
+    } else if (typeof FactionId === 'string' && isNaN(parseInt(FactionId))) {
+        let faction = await Faction.findOne({ where: { nom: FactionId } });
+
+        if (!faction) {
+            faction = await Faction.create({
+                nom: FactionId,
+            });
+            console.log(`Faction créée : ${faction.nom}`);
+        }
+
+        factionIdFinal = faction.id;
+    }
         const imagePrincipale = req.files.imagePrincipale?.[0] || null;
         const imagesSecondaires = req.files.imagesSecondaires || [];
 
-        const groupe = await Groupe.create({ nom, description, FactionId });
+        const groupe = await Groupe.create({ nom, description, FactionId: factionIdFinal });
 
         if (attributs) {
             const parsed = JSON.parse(attributs);
@@ -102,12 +129,37 @@ async function obtenirGroupeParId(req, res) {
 
 async function mettreAJourGroupe(req, res) {
     try {
-        const { nom, description, attributs, personnages, FactionId } = req.body;
+        const { nom, description, attributs, personnages, FactionId, factionNom } = req.body;
 
         const groupe = await Groupe.findByPk(req.params.id);
         if (!groupe) return res.status(404).json({ message: "Groupe introuvable" });
-
-        await groupe.update({ nom, description, FactionId });
+        let factionIdFinal = FactionId;
+        
+        // Résoudre la faction (ID ou nom) et la créer si elle n'existe pas
+        if (!factionIdFinal && factionNom) {
+         let faction = await Faction.findOne({ where: { nom: factionNom } });
+ 
+         if (!faction) {
+             faction = await Faction.create({
+                 nom: factionNom
+             });
+             console.log(`Faction créée : ${faction.nom}`);
+         }
+ 
+         factionIdFinal = faction.id;
+     } else if (typeof FactionId === 'string' && isNaN(parseInt(FactionId))) {
+         let faction = await Faction.findOne({ where: { nom: FactionId } });
+ 
+         if (!faction) {
+             faction = await Faction.create({
+                 nom: FactionId,
+             });
+             console.log(`Faction créée : ${faction.nom}`);
+         }
+ 
+         factionIdFinal = faction.id;
+     }
+        await groupe.update({ nom, description, FactionId: factionIdFinal });
 
         if (attributs) {
             await Attribut.destroy({ where: { entiteId: groupe.id, entiteType: 'Groupe' } });

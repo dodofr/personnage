@@ -2,7 +2,8 @@ module.exports = (sequelize, DataTypes) => {
     const Vehicule = sequelize.define('Vehicule', {
         nom: {
             type: DataTypes.STRING,
-            allowNull: false
+            allowNull: false,
+            unique: true
         },
         description: {
             type: DataTypes.TEXT

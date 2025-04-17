@@ -2,7 +2,8 @@ module.exports = (sequelize, DataTypes) => {
     const Pouvoir = sequelize.define('Pouvoir', {
         nom: {
             type: DataTypes.STRING,
-            allowNull: false
+            allowNull: false,
+            unique: true
         },
         description: {
             type: DataTypes.TEXT
