@@ -97,7 +97,7 @@ async function obtenirTousLesGroupes(req, res) {
                 { model: Personnage, as: 'personnages' },
                 { model: Attribut, as: 'attributs', where: { entiteType: 'Groupe' }, required: false },
                 { model: Image, as: 'images', where: { entiteType: 'Groupe' }, required: false },
-                { model: Faction, as: 'faction' }
+                { model: Faction, as: 'faction', attributes: ['id', 'nom'] } 
             ]
         });
         res.status(200).json(groupes);
