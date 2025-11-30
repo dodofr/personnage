@@ -21,7 +21,7 @@ function authenticateToken(req, res, next) {
         }
 
         req.user = currentUser; // Ajouter l'utilisateur à la requête
-        next(); // Passer à la fonction suivante (ici addEbookToBibliotheque)
+        next(); 
     });
 }
 

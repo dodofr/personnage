@@ -11,7 +11,7 @@ const AttributModel = require("../models/attributModel");
 const EquipementModel = require("../models/equipementModel");
 const ImageModel = require("../models/imageModel");
 
-//import tables de liason
+//import tables de liason, pas besoin de table de liaison car se creer automatiquement avec les associations
 //const PersonnageEquipementModel = require('../models/table de liaison/personnageEquipementModel');
 
 // Créer la connexion à la base de données MariaDB
@@ -47,7 +47,7 @@ const models = {
     //PersonnageEquipement,
 };
 
-// Appliquer les méthodes associate() pour chaque modèle
+// Appliquer les méthodes associate() pour chaque modèle en allant lire dans le modele
 Object.keys(models).forEach(modelName => {
     if (models[modelName].associate) {
         models[modelName].associate(models);
@@ -59,8 +59,8 @@ const initDb = async () => {
     try {
         await sequelize.authenticate();
         console.log("Connexion à la base de données réussie.");
-        await sequelize.query('SET FOREIGN_KEY_CHECKS = 1;');
-        await sequelize.sync({ force: true }); // force: false pour conserver les données
+        await sequelize.query('SET FOREIGN_KEY_CHECKS = 1;'); //tout supprimer si clef etrangere deja presente
+        await sequelize.sync({ force: true }); // force: false creer que ce qui manque et true pour supprimer les tables et donnée
         console.log("La base de données a bien été initialisée !");
     } catch (error) {
         console.error("Erreur lors de la connexion à la base de données :", error);

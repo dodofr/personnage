@@ -26,6 +26,7 @@ require('./src/routes/groupeRoutes')(app);
 require('./src/routes/attributRoutes')(app);
 require('./src/routes/imageRoutes')(app);
 require('./src/routes/personnageRoutes')(app);
+require('./src/routes/iaRoutes/personnageConversationRoute')(app);
 
 //remet tout a 0
 //sequelize.initDb()
