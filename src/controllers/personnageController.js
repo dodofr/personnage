@@ -35,10 +35,12 @@ const creerPersonnage = async (req, res) => {
       await personnage.reload();
   
       // Fonction générique pour sécuriser les associations
-      const safeMap = async (model, noms) =>
-        (await Promise.all(noms.map(nom => verifyOrCreate(model, nom))))
-          .filter(e => e !== null && e !== undefined);
-  
+      // const safeMap = async (model, noms) =>
+      //   (await Promise.all(noms.map(nom => verifyOrCreate(model, nom))))
+      //     .filter(e => e !== null && e !== undefined);
+        const safeMap = async (model, datas) =>
+          (await Promise.all(datas.map(d => verifyOrCreate(model, d))))
+            .filter(e => e !== null && e !== undefined);
       // Associations
       const planetesAssociations = await safeMap(Planete, parsedPlanetes);
       const vehiculesAssociations = await safeMap(Vehicule, parsedVehicules);

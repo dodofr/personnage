@@ -22,9 +22,34 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 let sessions = {};
 
+// Petit helper debug
+function debug(...args) {
+  if (process.env.DEBUG_IA === "true") {
+    console.log("[IA DEBUG]", ...args);
+  }
+}
+
 // Harmoniser les données reçues de l'IA pour le CRUD
 function harmoniserDataIA(data) {
-  // Stats par défaut
+
+  const toObjectList = (arr, type) => {
+    if (!arr) return [];
+
+    return arr.map(item => {
+      if (typeof item === "string") {
+        return {
+          nom: item,
+          descriptif: `Aucun descriptif fourni pour ${type} "${item}".`
+        };
+      }
+
+      return {
+        nom: item.nom || "Inconnu",
+        descriptif: item.descriptif || `Aucun descriptif fourni pour ${type} "${item.nom}".`
+      };
+    });
+  };
+
   const stats = data.donnees?.stats || {
     intelligence: 50,
     force: 50,
@@ -33,46 +58,23 @@ function harmoniserDataIA(data) {
     charisme: 50
   };
 
-  // Attributs dynamiques
-  let attributs = [];
-  if (Array.isArray(data.items) && data.items.length > 0) {
-    attributs = data.items
-      .map(a =>
-        typeof a === "string" ? { nom: a, valeur: "Inconnu" } :
-        a.nom && a.valeur ? { nom: a.nom, valeur: a.valeur } :
-        null
-      )
-      .filter(a => a !== null);
-  } else if (Array.isArray(data.donnees?.attributs)) {
-    attributs = data.donnees.attributs
-      .map(a => (a.nom && a.valeur ? { nom: a.nom, valeur: a.valeur } : null))
-      .filter(a => a !== null);
-  }
+  const attributs = Array.isArray(data.donnees?.attributs)
+    ? data.donnees.attributs.map(a => ({
+        nom: a.nom || "Attribut",
+        valeur: a.valeur || "Inconnu"
+      }))
+    : [];
 
-  // Groupes
-  const groupes = Array.isArray(data.donnees?.groupes) ? data.donnees.groupes : [];
-
-  // Factions / affiliations
-  const affiliations = data.donnees?.affiliations || data.donnees?.factions || [];
-  const factions = Array.isArray(affiliations) ? affiliations : affiliations.split(";").map(s => s.trim());
-
-  // Planètes
-  const planetes = data.donnees?.planetes
-    ? Array.isArray(data.donnees.planetes)
-      ? data.donnees.planetes
-      : [data.donnees.planetes]
-    : data.donnees?.planete_origine
-      ? [data.donnees.planete_origine]
-      : [];
-
-  // Équipements, véhicules, pouvoirs
-  const equipements = Array.isArray(data.donnees?.equipements) ? data.donnees.equipements : [];
-  const vehicules = Array.isArray(data.donnees?.vehicules) ? data.donnees.vehicules : [];
-  const pouvoirs = Array.isArray(data.donnees?.pouvoirs) ? data.donnees.pouvoirs : [];
+  const planetes   = toObjectList(data.donnees?.planetes || [], "planète");
+  const groupes    = toObjectList(data.donnees?.groupes || [], "groupe");
+  const factions   = toObjectList(data.donnees?.affiliations || data.donnees?.factions || [], "faction");
+  const pouvoirs   = toObjectList(data.donnees?.pouvoirs || [], "pouvoir");
+  const vehicules  = toObjectList(data.donnees?.vehicules || [], "véhicule");
+  const equipements= toObjectList(data.donnees?.equipements || [], "équipement");
 
   return {
     nom: data.nomPersonnage || "SansNom",
-    descriptif: data.donnees?.description || "",
+    descriptif: data.donnees?.description || "Aucune description fournie.",
     stats: JSON.stringify(stats),
     planetes: JSON.stringify(planetes),
     groupes: JSON.stringify(groupes),
@@ -84,10 +86,18 @@ function harmoniserDataIA(data) {
   };
 }
 
+exports.iaHistorique = (req, res) => {
+  const sessionId = req.query.sessionId;
+  if (!sessionId || !sessions[sessionId]) {
+    return res.status(404).json({ message: "Session introuvable." });
+  }
+  res.json(sessions[sessionId].historique);
+};
+
 exports.iaConversationPersonnage = async (req, res) => {
   try {
-    console.log("=== Nouvelle requête IA ===");
-    console.log("Body reçu :", req.body);
+    debug("=== Nouvelle requête IA ===");
+    debug("Body reçu :", req.body);
 
     const sessionId = req.body.sessionId;
     const prompt = req.body.message || req.body.prompt;
@@ -97,44 +107,76 @@ exports.iaConversationPersonnage = async (req, res) => {
 
     if (!sessions[sessionId]) sessions[sessionId] = { personnageId: null, historique: [] };
     const session = sessions[sessionId];
-    console.log("Session récupérée :", sessionId, session);
+    debug("Session récupérée :", sessionId, session);
 
     const userMessage = { role: "user", content: prompt };
 
     const systemPrompt = `
-Tu es une IA Star Wars spécialisée. Tu dois toujours répondre uniquement avec un JSON STRICT.
+Tu es une IA Star Wars spécialisée.  
+Tu dois TOUJOURS répondre avec un JSON STRICT, sans aucun texte avant ou après.
 
-JSON attendu :
+FORMAT JSON ATTENDU :
 {
-  "action": "creer | modifier | ajouter_relation | retirer_relation | changer_champ | supprimer",
+  "action": "creer | modifier | ajouter_relation | retirer_relation | changer_champ | supprimer | chercher",
   "nomPersonnage": "",
   "champ": "",
   "valeur": "",
   "relationType": "",
   "items": [],
-  "donnees": {}
+  "donnees": {
+    "description": "",
+    "stats": {
+      "intelligence": 0,
+      "force": 0,
+      "agilite": 0,
+      "endurance": 0,
+      "charisme": 0
+    },
+    "attributs": [],
+    "planetes": [],
+    "groupes": [],
+    "factions": [],
+    "pouvoirs": [],
+    "vehicules": [],
+    "equipements": []
+  }
 }
 
-Instructions :
-1. Si l'utilisateur demande de créer un personnage ("action": "creer") :
-   - REMPLIR AUTOMATIQUEMENT TOUS LES CHAMPS :
-     - description : texte détaillé sur le personnage
-     - planetes : planète d'origine
-     - groupes : grand ensemble politique ou militaire (ex: République)
-     - factions : sous-groupe (ex: 501ème Légion)
-     - stats : valeurs "figées" (intelligence, force, agilite, endurance, charisme)
-     - attributs : traits dynamiques (sens du devoir, tir de précision, initiative…)
-     - pouvoirs : pouvoirs spéciaux (pouvoirs de la Force, capacités uniques)
-     - vehicules : véhicule attitré si applicable
-     - equipements : items de base (blaster, comlink, etc.)
-   - Tous les champs doivent contenir des noms ou valeurs cohérents et pertinents.
-   - Attributs dynamiques : au moins 2 objets {nom, valeur}.
+RÈGLES GÉNÉRALES :
+1. **STRICTEMENT JSON** → aucune phrase en dehors du JSON.
+2. Tous les champs doivent exister même si l'utilisateur ne les mentionne pas.
+3. Tous les tableaux doivent contenir des données pertinentes (min 1 élément).
 
-2. STRICTEMENT JSON, aucun texte libre hors JSON.
-3. Tous les tableaux doivent être remplis même si l'utilisateur n'en fournit pas.
+SI "action" = "creer" :
+- Tu dois produire un personnage COMPLET basé sur l'univers Star Wars.
+- REMPLIR AUTOMATIQUEMENT :
+  - description : paragraphe détaillé
+  - planetes : au moins 1 objet { nom, descriptif }
+  - groupes : au moins 1 objet { nom, descriptif }
+  - factions : au moins 1 objet { nom, descriptif }
+  - pouvoirs : au moins 1 objet { nom, descriptif }
+  - vehicules : si logique, sinon un véhicule générique crédible
+  - equipements : au moins 1 équipement cohérent { nom, descriptif }
+  - attributs dynamiques : AU MOINS 2 objets { nom, valeur }
+  - stats : 5 valeurs entières entre 0 et 100 (toujours présentes)
+
+RÈGLE IMPORTANTE :
+- Chaque élément dans planetes, groupes, factions, pouvoirs, vehicules, equipements
+  doit être sous la forme :
+  { "nom": "NomDeLEntité", "descriptif": "Description courte et cohérente" }
+
+- Les attributs doivent être sous la forme :
+  { "nom": "NomAttrib", "valeur": "ValeurAttrib" }
+
+SI "action" ≠ "creer":
+- Fournir UNIQUEMENT les champs utiles selon l’action.
+- Ne jamais inventer un format différent.
+
+RESPECT ABSOLU DU FORMAT JSON.
 `;
 
-    console.log("Envoi de la requête à OpenAI...");
+    debug("Envoi de la requête à OpenAI...");
+
     const completion = await openai.chat.completions.create({
       model: "gpt-5-nano",
       messages: [
@@ -147,13 +189,14 @@ Instructions :
     let data;
     try {
       const content = completion.choices[0].message.content;
+      debug("Réponse brute OpenAI :", content);
       data = JSON.parse(content);
     } catch (err) {
-      console.error("Erreur parsing JSON OpenAI :", err, "Contenu :", completion.choices[0].message.content);
+      console.error("Erreur parsing JSON OpenAI :", err);
       return res.status(500).json({ message: "Impossible de parser la réponse IA." });
     }
 
-    console.log("Data parsée :", data);
+    debug("Data parsée :", JSON.stringify(data, null, 2));
 
     session.historique.push(userMessage);
     session.historique.push({ role: "assistant", content: JSON.stringify(data) });
@@ -164,14 +207,16 @@ Instructions :
       if (personnage) session.personnageId = personnage.id;
     }
     if (!personnage && session.personnageId) personnage = await Personnage.findByPk(session.personnageId);
-    if (!personnage && data.action !== "creer") return res.status(404).json({ message: "Aucun personnage trouvé." });
+    if (!personnage && data.action !== "creer")
+      return res.status(404).json({ message: "Aucun personnage trouvé." });
 
-    console.log("Action à effectuer :", data.action);
+    debug("Action détectée :", data.action);
 
     switch (data.action) {
       case "creer":
         req.body = harmoniserDataIA(data);
         req.files = {};
+        debug("Body final pour création :", req.body);
         return creerPersonnage(req, res);
 
       case "supprimer":
@@ -179,7 +224,17 @@ Instructions :
         const resp = await supprimerPersonnage(req, res);
         session.personnageId = null;
         return resp;
-
+      case "chercher":
+        if (!personnage) return res.status(404).json({ message: "Personnage introuvable" });
+        // Inclure toutes les relations et attributs
+        const persoComplet = await Personnage.findByPk(personnage.id, {
+          include: [
+           { model: Attribut, where: { entiteType: 'Personnage' }, required: false },
+           { model: Image, as: 'images', required: false },
+           Planete, Vehicule, Faction, Pouvoir, Groupe, Equipement
+      ]
+    });
+    return res.status(200).json(persoComplet);
       case "changer_champ":
       case "ajouter_relation":
       case "retirer_relation":
@@ -213,6 +268,7 @@ Instructions :
 
         req.body = base;
         req.files = {};
+        debug("Body final pour update :", req.body);
         return mettreAJourPersonnage(req, res);
 
       default:
